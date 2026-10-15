@@ -1,0 +1,14 @@
+
+# File sistem dan editor
+.DS_Store
+Thumbs.db
+.vscode/
+
+# File sementara Arduino
+build/
+*.tmp
+*.bak
+
+# File rahasia
+.env
+secrets.h
