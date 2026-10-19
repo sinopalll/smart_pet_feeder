@@ -1,14 +1,6 @@
-/*
- * ============================================================
- *  SMART PET FEEDER - MULTI-MODE CONTROLLER
- *  Mode: 0 = Manual (Button), 1 = Smart (Load Cell), 2 = Schedule (NTP)
- *  Kelompok 5
- * ============================================================
- */
-
-#define BLYNK_TEMPLATE_ID   "TMPL6BR0CA82x"       // Ganti dengan Template ID Anda
-#define BLYNK_TEMPLATE_NAME "smart pet feeder" // Ganti dengan nama Template Anda
-#define BLYNK_AUTH_TOKEN    "f5Y8rcJgyBlFJyhH-FIC3-p1ieT1f-_W"  // Ganti dengan Token Perangkat Anda
+#define BLYNK_TEMPLATE_ID   "TMPL6BR0CA82x"
+#define BLYNK_TEMPLATE_NAME "smart pet feeder"
+#define BLYNK_AUTH_TOKEN    "f5Y8rcJgyBlFJyhH-FIC3-p1ieT1f-_W"
 #define BLYNK_PRINT Serial
 
 #include <ESP8266WiFi.h>
