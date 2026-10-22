@@ -30,10 +30,13 @@ char pass[] = "q2w3e4r5t6!";
 // Variabel Pengatur Sistem
 const int EEPROM_ADDR_OFFSET = 0; // Alamat EEPROM untuk menyimpan nilai offset Load Cell
 long loadcell_offset = 0;         // Variabel untuk menampung offset
+const int EEPROM_ADDR_TZ = 4;     // Alamat EEPROM untuk Zona Waktu
+int zonaWaktu = 7;                // Default awal: 7 (WIB / UTC+7)
 
 int modeOperasi = MODE_MANUAL; // Default awal adalah manual
 float calibration_factor = 392.0;
-const float BATAS_BERAT_MINIMUM = 20.0;
+const float BATAS_BERAT_MINIMUM = 20.0; // Berat minimum pakan dipiring (gr)
+const float TINGGI_WADAH_CM = 20.0; // Tinggi wadah pakan utama (cm)
 
 int jadwalJam[MAKSIMAL_JADWAL];
 int jadwalMenit[MAKSIMAL_JADWAL];
@@ -88,8 +91,20 @@ void setup() {
 
   Blynk.begin(BLYNK_AUTH_TOKEN, ssid, pass);
 
-  // NTP Time Sync (WIB = UTC+7)
-  configTime(25200, 0, "pool.ntp.org", "time.nist.gov");
+// --- PENGATURAN ZONA WAKTU DINAMIS ---
+  EEPROM.get(EEPROM_ADDR_TZ, zonaWaktu); // Baca zona waktu dari memori
+  
+  // Validasi: Jika memori kosong/error, paksa ke default UTC+7
+  if (zonaWaktu < -12 || zonaWaktu > 14) { 
+    zonaWaktu = 7; 
+  }
+  
+  // Terapkan zona waktu ke NTP (1 jam = 3600 detik)
+  configTime(zonaWaktu * 3600, 0, "pool.ntp.org", "time.nist.gov");
+  
+  Serial.print(F("[-] Sistem waktu disinkronkan ke zona: UTC"));
+  if (zonaWaktu >= 0) Serial.print(F("+"));
+  Serial.println(zonaWaktu);
 
   // Timer: Pembacaan sensor dan telemetri (tiap 4 detik)
   timer.setInterval(4000L, loopPengawasan);
@@ -112,11 +127,21 @@ void loopPengawasan() {
   long kuatSinyal = WiFi.RSSI(); // Membaca kekuatan sinyal dalam satuan dBm
   Blynk.virtualWrite(V9, kuatSinyal); 
 
-  // 1. Baca Ultrasonik (Selalu aktif)
+// 1. Baca Jarak Ultrasonik
   long jarak_cm = bacaJarakUltrasonik();
-  Blynk.virtualWrite(V0, jarak_cm);
+  
+  // Konversi Jarak ke Persentase Sisa Pakan
+  float sisa_pakan = TINGGI_WADAH_CM - jarak_cm;
+  int persentase = (sisa_pakan / TINGGI_WADAH_CM) * 100;
 
-  // 2. Baca Berat (Selalu aktif untuk update indikator di Dashboard Blynk)
+  // Validasi agar persentase tidak tembus di bawah 0% atau di atas 100%
+  if (persentase < 0) persentase = 0;
+  if (persentase > 100) persentase = 100;
+
+  // Kirim nilai persentase ke Blynk (V0)
+  Blynk.virtualWrite(V0, persentase);
+
+  // 2. Baca Berat
   float berat_gram = bacaBeratLoadCell();
   Blynk.virtualWrite(V1, (int)berat_gram); 
 
@@ -206,21 +231,7 @@ void beriPakan() {
 
 BLYNK_CONNECTED() {
   Serial.println(F("[NETWORK] Berhasil terhubung ke WiFi dan Server Blynk!"));
-  
-  // Mengirim teks "ONLINE" ke Virtual Pin V8 saat terhubung
-  Blynk.virtualWrite(V8, "ONLINE");
-  
-  // (Opsional) Sinkronisasi status tombol/jadwal dari server ke alat
-  Blynk.syncVirtual(V4, V5, V6); 
-}
-
-// V6: Pemilihan Mode oleh Pengguna
-BLYNK_WRITE(V6) {
-  modeOperasi = param.asInt();
-  Serial.print(F("[CONFIG] Mode berganti ke: "));
-  if (modeOperasi == MODE_MANUAL) Serial.println(F("MANUAL"));
-  else if (modeOperasi == MODE_SMART) Serial.println(F("SMART (Load Cell)"));
-  else if (modeOperasi == MODE_SCHEDULE) Serial.println(F("SCHEDULE (NTP)"));
+  Blynk.virtualWrite(V5, zonaWaktu);
 }
 
 // V3: Pemicu Manual (Push Button)
@@ -275,6 +286,31 @@ BLYNK_WRITE(V4) {
     }
   }
   Serial.print(F("[JADWAL] Total jadwal aktif: ")); Serial.println(jumlahJadwal);
+}
+
+// V5: Pengaturan Zona Waktu
+BLYNK_WRITE(V5) {
+  zonaWaktu = param.asInt();
+  
+  // Terapkan langsung ke sistem NTP
+  configTime(zonaWaktu * 3600, 0, "pool.ntp.org", "time.nist.gov");
+  
+  // Simpan ke EEPROM agar permanen
+  EEPROM.put(EEPROM_ADDR_TZ, zonaWaktu);
+  EEPROM.commit();
+  
+  Serial.print(F("[CONFIG] Zona Waktu berhasil diubah ke: UTC"));
+  if (zonaWaktu >= 0) Serial.print(F("+"));
+  Serial.println(zonaWaktu);
+}
+
+// V6: Pemilihan Mode oleh Pengguna
+BLYNK_WRITE(V6) {
+  modeOperasi = param.asInt();
+  Serial.print(F("[CONFIG] Mode berganti ke: "));
+  if (modeOperasi == MODE_MANUAL) Serial.println(F("MANUAL"));
+  else if (modeOperasi == MODE_SMART) Serial.println(F("SMART (Load Cell)"));
+  else if (modeOperasi == MODE_SCHEDULE) Serial.println(F("SCHEDULE (NTP)"));
 }
 
 // V7: Tombol Kalibrasi Nol / Tare Manual (Mode PUSH)
