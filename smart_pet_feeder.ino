@@ -1,8 +1,4 @@
-#define BLYNK_TEMPLATE_ID   "TMPL6BR0CA82x"
-#define BLYNK_TEMPLATE_NAME "smart pet feeder"
-#define BLYNK_AUTH_TOKEN    "f5Y8rcJgyBlFJyhH-FIC3-p1ieT1f-_W"
-#define BLYNK_PRINT Serial
-
+#include "secrets.h"
 #include <ESP8266WiFi.h>
 #include <BlynkSimpleEsp8266.h>
 #include <HX711.h>
@@ -10,9 +6,14 @@
 #include <time.h>
 #include <EEPROM.h>
 
+#define BLYNK_TEMPLATE_ID   "TMPL6BR0CA82x"
+#define BLYNK_TEMPLATE_NAME "smart pet feeder"
+#define BLYNK_AUTH_TOKEN    SECRET_BLYNK_TOKEN
+#define BLYNK_PRINT Serial
+
 // 2. KONEKSI WI-FI
-char ssid[] = "esp8266";
-char pass[] = "q2w3e4r5t6!";
+char ssid[] = SECRET_WIFI_SSID;
+char pass[] = SECRET_WIFI_PASS;
 
 // Pemetaan Pin GPIO
 #define PIN_TRIG        13  // D7
@@ -32,6 +33,7 @@ const int EEPROM_ADDR_OFFSET = 0; // Alamat EEPROM untuk menyimpan nilai offset 
 long loadcell_offset = 0;         // Variabel untuk menampung offset
 const int EEPROM_ADDR_TZ = 4;     // Alamat EEPROM untuk Zona Waktu
 int zonaWaktu = 7;                // Default awal: 7 (WIB / UTC+7)
+int modeSebelumnya = -1; // Menyimpan mode terakhir yang dicetak
 
 int modeOperasi = MODE_MANUAL; // Default awal adalah manual
 float calibration_factor = 392.0;
@@ -42,6 +44,11 @@ int jadwalJam[MAKSIMAL_JADWAL];
 int jadwalMenit[MAKSIMAL_JADWAL];
 bool sudahMakan[MAKSIMAL_JADWAL];
 int jumlahJadwal = 0; // Menyimpan info berapa banyak jadwal yang aktif
+
+// Cek apakah tahun sudah di atas 2023 (berarti NTP sudah sukses sinkron)
+bool waktuValid() {
+  return time(nullptr) > 1700000000; 
+}
 
 HX711 scale;
 Servo myServo;
@@ -86,12 +93,11 @@ void setup() {
     EEPROM.commit(); // Eksekusi simpan ke memori
   }
 
-  myServo.attach(PIN_SERVO);
   myServo.write(0);
 
   Blynk.begin(BLYNK_AUTH_TOKEN, ssid, pass);
 
-// --- PENGATURAN ZONA WAKTU DINAMIS ---
+  // --- PENGATURAN ZONA WAKTU DINAMIS ---
   EEPROM.get(EEPROM_ADDR_TZ, zonaWaktu); // Baca zona waktu dari memori
   
   // Validasi: Jika memori kosong/error, paksa ke default UTC+7
@@ -129,45 +135,76 @@ void loopPengawasan() {
 
 // 1. Baca Jarak Ultrasonik
   long jarak_cm = bacaJarakUltrasonik();
-  
-  // Konversi Jarak ke Persentase Sisa Pakan
-  float sisa_pakan = TINGGI_WADAH_CM - jarak_cm;
-  int persentase = (sisa_pakan / TINGGI_WADAH_CM) * 100;
 
-  // Validasi agar persentase tidak tembus di bawah 0% atau di atas 100%
-  if (persentase < 0) persentase = 0;
-  if (persentase > 100) persentase = 100;
+  // Hanya hitung persentase jika ultrasonik berhasil membaca (bukan -1)
+  if (jarak_cm != -1.0) {
+    float sisa_pakan = TINGGI_WADAH_CM - jarak_cm;
+    int persentase = (sisa_pakan / TINGGI_WADAH_CM) * 100;
+    
+    if (persentase < 0) persentase = 0;
+    if (persentase > 100) persentase = 100;
+    
+    Blynk.virtualWrite(V0, persentase);
+  } else {
+    Serial.println(F("[ERROR] Ultrasonik gagal merespons!"));
+  }
 
   // Kirim nilai persentase ke Blynk (V0)
   Blynk.virtualWrite(V0, persentase);
 
   // 2. Baca Berat
-  float berat_gram = bacaBeratLoadCell();
-  Blynk.virtualWrite(V1, (int)berat_gram); 
+    float berat_gram = bacaBeratLoadCell();
+    
+    // Pastikan sensor tidak error sebelum mengirim data ke Blynk
+    if (berat_gram != -1.0) {
+      // Kirim data dengan presisi 1 angka di belakang koma, hapus (int)
+      Blynk.virtualWrite(V1, berat_gram); 
+    }
+
+  // --- ANTI-SPAM LOG SERIAL ---
+    static int modeSebelumnya = -1;
+    if (modeOperasi != modeSebelumnya) {
+      Serial.print(F("[MODE] Aktif: "));
+      if (modeOperasi == MODE_MANUAL) Serial.println(F("MANUAL"));
+      else if (modeOperasi == MODE_SMART) Serial.println(F("SMART"));
+      else if (modeOperasi == MODE_SCHEDULE) Serial.println(F("SCHEDULE"));
+      modeSebelumnya = modeOperasi; // Simpan status terakhir
+    }
 
   // 3. Logika Mode
   switch (modeOperasi) {
     case MODE_MANUAL:
-      Serial.println(F("[MODE] MANUAL: Menunggu pemicu tombol Blynk."));
       Blynk.virtualWrite(V2, "Mode Manual");
       break;
 
     case MODE_SMART:
-      Serial.print(F("[MODE] SMART: Berat terbaca: "));
-      Serial.print((int)berat_gram);
-      Serial.println(F(" gr"));
-
-      // Hanya dieksekusi otomatis jika mode SMART
       if (berat_gram < BATAS_BERAT_MINIMUM) {
-        Serial.println(F("[TRIGGER SMART] Wadah kosong, mengisi ulang..."));
-        beriPakan();
+        
+        // PENGAMAN 1: Cek isi tabung. Jangan buka servo jika tabung habis!
+        if (persentase <= 5) { 
+          Blynk.virtualWrite(V2, "Tabung Habis!");
+          // BLYNK_LOG_EVENT("pakan_habis"); // Bisa diaktifkan nanti kalau sudah buat event di Web
+        } 
+        // PENGAMAN 2: Jeda waktu (Cooldown) agar tidak overfeeding
+        else {
+          static unsigned long waktuTerakhirSmart = 0;
+          unsigned long jeda_ms = 30 * 60 * 1000UL; // Jeda 30 menit (dalam milidetik)
+
+          // Cek apakah sudah lewat 30 menit dari pemberian terakhir (atau baru pertama kali nyala)
+          if (millis() - waktuTerakhirSmart >= jeda_ms || waktuTerakhirSmart == 0) {
+            Serial.println(F("[TRIGGER SMART] Wadah kosong, mengisi ulang..."));
+            beriPakan();
+            waktuTerakhirSmart = millis(); // Catat waktu pemberian pakan terakhir
+          } else {
+            Blynk.virtualWrite(V2, "Jeda Waktu");
+          }
+        }
       } else {
         Blynk.virtualWrite(V2, "Pakan Cukup");
       }
       break;
 
     case MODE_SCHEDULE:
-      Serial.println(F("[MODE] SCHEDULE: Berjalan sesuai pengaturan waktu NTP."));
       Blynk.virtualWrite(V2, "Standby Jadwal");
       break;
   }
@@ -177,52 +214,37 @@ void loopPengawasan() {
 // LOGIKA MODE SCHEDULE (WAKTU NTP)
 // ------------------------------------------------------------
 void cekJadwalMakan() {
-  if (modeOperasi != MODE_SCHEDULE) return;
+  // 1. JANGAN LAKUKAN APA-APA JIKA WAKTU BELUM SINKRON
+  if (!waktuValid()) return; 
 
   time_t now = time(nullptr);
   struct tm* p_tm = localtime(&now);
-
-  int jamSekarang = p_tm->tm_hour;
-  int menitSekarang = p_tm->tm_min;
-
-  // Reset status harian setiap jam 00:00 (Tengah malam)
-  if (jamSekarang == 0 && menitSekarang == 0) {
-    for (int i = 0; i < jumlahJadwal; i++) {
-      sudahMakan[i] = false; 
+  
+  // 2. LOGIKA RESET JADWAL YANG LEBIH AMAN (Berdasarkan Pergantian Hari)
+  static int hariTerakhir = -1;
+  if (hariTerakhir != -1 && p_tm->tm_yday != hariTerakhir) {
+    // Hari berganti, reset semua memori jadwal
+    for (int i = 0; i < MAKSIMAL_JADWAL; i++) {
+      sudahMakan[i] = false;
     }
+    Serial.println(F("[JADWAL] Hari berganti, memori jadwal di-reset."));
   }
+  hariTerakhir = p_tm->tm_yday; // Simpan memori hari ini
 
-  // Cek secara berurutan, apakah jam & menit saat ini cocok dengan salah satu jadwal?
-  for (int i = 0; i < jumlahJadwal; i++) {
-    if (jadwalJam[i] != -1 && jadwalMenit[i] != -1) {
-      if (jamSekarang == jadwalJam[i] && menitSekarang == jadwalMenit[i]) {
-        if (!sudahMakan[i]) { // Pastikan belum diberi makan pada jadwal ini
-          Serial.print(F("[TRIGGER SCHEDULE] Waktu makan ke-"));
-          Serial.print(i + 1);
-          Serial.println(F(" tercapai!"));
-          
-          beriPakan();
-          sudahMakan[i] = true; // Tandai bahwa jadwal ini sudah dieksekusi hari ini
-        }
-      }
-    }
-  }
+  // 3. (Lanjutkan dengan logika loop for pengecekan jam & menit Anda...)
 }
 
 // ------------------------------------------------------------
 // EKSEKUSI KATUP SERVO
 // ------------------------------------------------------------
-void beriPakan() {
-  Blynk.virtualWrite(V2, "Mengisi Pakan...");
-  Serial.println(F("[AKSI] Membuka katup servo..."));
-
+void beriMakan() {
+  Serial.println(F("[-] Membuka katup pakan..."));
+  myServo.attach(2);
   myServo.write(90);
-  delay(2000); // Durasi jatuh pakan
+  delay(2000);
   myServo.write(0);
-
-  Serial.println(F("[AKSI] Katup tertutup."));
-  Blynk.virtualWrite(V2, "Selesai Mengisi");
-  delay(2000); // Jeda stabilisasi
+  delay(500);
+  myServo.detach();
 }
 
 // ------------------------------------------------------------
@@ -336,19 +358,27 @@ BLYNK_WRITE(V7) {
 // ------------------------------------------------------------
 // FUNGSI SENSOR
 // ------------------------------------------------------------
-long bacaJarakUltrasonik() {
+float bacaJarakUltrasonik() {
   digitalWrite(PIN_TRIG, LOW);
   delayMicroseconds(2);
   digitalWrite(PIN_TRIG, HIGH);
   delayMicroseconds(10);
   digitalWrite(PIN_TRIG, LOW);
-
-  long durasi = pulseIn(PIN_ECHO, HIGH, 30000);
-  return (durasi * 0.034 / 2);
+  
+  // Beri timeout 30.000 mikrodetik (30ms)
+  long durasi = pulseIn(PIN_ECHO, HIGH, 30000); 
+  
+  if (durasi == 0) return -1.0; // Beri sinyal error -1 jika gagal baca
+  
+  return durasi * 0.0343 / 2.0; // Kembalikan nilai jarak dalam float (presisi tinggi)
 }
 
 float bacaBeratLoadCell() {
-  float berat = scale.get_units(5);
-  if (berat < 0) berat = 0;
-  return berat;
+  // Tunggu maksimal 1000 milidetik (1 detik) agar alat tidak hang
+  if (scale.wait_ready_timeout(1000)) { 
+    return scale.get_units(5); // Ambil rata-rata 5 pembacaan
+  } else {
+    Serial.println(F("[ERROR] HX711 tidak merespons! (Kabel longgar/putus)"));
+    return -1.0; // Kembalikan nilai -1.0 sebagai tanda error
+  }
 }

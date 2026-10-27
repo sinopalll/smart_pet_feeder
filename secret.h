@@ -1,0 +1,3 @@
+#define SECRET_BLYNK_TOKEN "f5Y8rcJgyBlFJyhH-FIC3-p1ieT1f-_W"
+#define SECRET_WIFI_SSID "esp8266"
+#define SECRET_WIFI_PASS "q2w3e4r5t6!"
