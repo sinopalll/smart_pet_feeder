@@ -12,3 +12,4 @@ build/
 # File rahasia
 .env
 secrets.h
+AGENTS.md
