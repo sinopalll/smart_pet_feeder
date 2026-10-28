@@ -57,6 +57,7 @@ unsigned long waktuManualTerakhir = 0UL - JEDA_MANUAL_MS;
 
 String        statusTerakhir = "";
 unsigned long tahanSampai = 0;
+String        alertSensorTerakhir = "";
 
 // ------------------------------------------------------------
 // UTILITAS
