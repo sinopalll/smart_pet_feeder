@@ -12,5 +12,6 @@ build/
 *.bak
 
 # File rahasia dan konfigurasi agent
-include/secrets.h
+secret.h
+secrets.h
 AGENTS.md

@@ -1,213 +1,326 @@
 # Smart Pet Feeder IoT (NodeMCU ESP8266 + Blynk)
 
-Sistem pemberi pakan hewan peliharaan otomatis berbasis **NodeMCU V3 CH340 (ESP8266)** yang terintegrasi dengan **Blynk IoT**. Dirancang untuk mempermudah pemantauan dan pemberian pakan jarak jauh dengan tiga mode operasi: *Manual*, *Smart* (berbasis berat piring), dan *Schedule* (berbasis jadwal waktu).
+Sistem pemberi pakan hewan peliharaan otomatis berbasis **NodeMCU V3 CH340 (ESP8266)** yang terintegrasi dengan **Blynk IoT**. Dirancang untuk pemantauan dan pemberian pakan jarak jauh dengan tiga mode operasi: *Manual*, *Smart* (berbasis berat piring), dan *Schedule* (berbasis jadwal waktu).
+
+---
 
 ## Daftar Isi
 
 - [Fitur Utama](#fitur-utama)
-- [Komponen Perangkat Keras](#komponen-perangkat-keras)
-- [Pemetaan Pin (Wiring)](#pemetaan-pin-wiring)
-- [Struktur File Project](#struktur-file-project)
-- [Library yang Dibutuhkan](#library-yang-dibutuhkan)
-- [Instalasi & Konfigurasi](#instalasi--konfigurasi)
+- [Komponen Hardware](#komponen-hardware)
+- [Wiring & Pin Mapping](#wiring--pin-mapping)
+- [Struktur Direktori](#struktur-direktori)
+- [Persiapan Environment PlatformIO](#persiapan-environment-platformio)
+- [Instalasi Dependensi](#instalasi-dependensi)
+- [Konfigurasi Wi-Fi & Blynk](#konfigurasi-wi-fi--blynk)
+- [Build & Upload Firmware](#build--upload-firmware)
 - [Kalibrasi Load Cell](#kalibrasi-load-cell)
+- [Reset EEPROM](#reset-eeprom)
 - [Konfigurasi Blynk IoT](#konfigurasi-blynk-iot)
 - [Cara Penggunaan](#cara-penggunaan)
-- [File Pendukung](#file-pendukung)
 - [Troubleshooting](#troubleshooting)
 - [Catatan Penting](#catatan-penting)
+
+---
 
 ## Fitur Utama
 
 - **Tiga Mode Operasi**
   - **Manual (V6 = 1)** – Memberi pakan langsung melalui tombol di aplikasi Blynk dengan jeda 10 detik antar penekanan.
-  - **Smart (V6 = 2)** – Otomatis memberi pakan jika berat di piring kurang dari batas minimum (default `20 gram`). Dilengkapi *cooldown* 30 menit, batas maksimal 6 kali per hari, serta reset hitungan harian berdasarkan waktu lokal.
-  - **Schedule (V6 = 3)** – Memberi pakan otomatis berdasarkan jadwal waktu 24-jam yang bisa diatur lewat aplikasi Blynk (maksimal 5 jadwal dalam satu hari).
-- **Pemberian Pakan Berbasis Berat** – Katup servo akan terbuka dan menutup secara otomatis berdasarkan pertambahan berat di piring (`TARGET_PORSI_GRAM - MARGIN_JATUHAN_GRAM`), bukan durasi tetap.
-- **Multi-Jadwal Dinamis** – Atur jadwal dengan format `HH:MM, HH:MM, ...` langsung dari kolom input di Blynk.
-- **Kalibrasi Permanen di EEPROM** – Nilai *offset* Load Cell (titik 0) tersimpan di EEPROM, sehingga tidak perlu dikalibrasi ulang saat mati listrik.
-- **Pengaman Sistem** – Proteksi tabung hampir habis, piring sudah penuh, deteksi pakan macet, *timeout* katup (batas keras 5 detik), serta *fallback* durasi jika Load Cell tidak merespons saat katup terbuka.
-- **Sinkronisasi Waktu (NTP)** – Menggunakan `pool.ntp.org` & `time.nist.gov` dengan offset zona waktu manual (default `UTC+7 / WIB`).
-- **Non-Blocking** – Seluruh proses (WiFi, Blynk, servo, timer) dirancang agar tidak saling memblokir, sehingga penutupan katup tetap aman.
-- **Telemetri Real-Time** – Menampilkan sisa pakan di tabung (%), berat piring (gram), status sistem, mode aktif, serta kekuatan sinyal WiFi (RSSI).
+  - **Smart (V6 = 2)** – Otomatis memberi pakan jika berat piring < batas minimum (default `20 gram`). Dilengkapi *cooldown* 30 menit, batas 6 kali per hari, dan reset harian berdasarkan waktu lokal.
+  - **Schedule (V6 = 3)** – Memberi pakan otomatis sesuai jadwal 24 jam yang dapat diatur dari aplikasi Blynk (maksimal 5 jadwal per hari).
+- **Pemberian Pakan Berbasis Berat** – Katup servo terbuka dan menutup otomatis berdasarkan pertambahan berat (`TARGET_PORSI_GRAM - MARGIN_JATUHAN_GRAM`), bukan durasi tetap.
+- **Multi-Jadwal Dinamis** – Atur jadwal format `HH:MM, HH:MM, ...` langsung dari Blynk.
+- **Kalibrasi Permanen di EEPROM** – Offset Load Cell disimpan di EEPROM, tidak perlu kalibrasi ulang saat restart.
+- **Pengaman Sistem** – Proteksi tabung hampir habis, piring sudah penuh, deteksi pakan macet, *timeout* katup (batas keras 5 detik), dan *fallback* durasi jika Load Cell tidak merespons.
+- **Sinkronisasi Waktu NTP** – Menggunakan `pool.ntp.org` & `time.nist.gov` dengan offset zona waktu manual (default `UTC+7 / WIB`).
+- **Non-Blocking** – Seluruh proses (Wi-Fi, Blynk, servo, timer) dirancang agar tidak saling memblokir.
+- **Telemetri Real-Time** – Sisa pakan tabung (%), berat piring (gram), status sistem, mode aktif, dan kekuatan sinyal Wi-Fi (RSSI).
 
-## Komponen Perangkat Keras
+---
+
+## Komponen Hardware
 
 | Komponen | Keterangan |
-| --- | --- |
+|---|---|
 | **Mikrokontroler** | NodeMCU V3 CH340 (ESP8266) |
-| **Sensor Jarak** | HC-SR04 Ultrasonic Sensor (untuk menghitung sisa pakan di tabung) |
-| **Sensor Berat** | Load Cell + HX711 Module (untuk mengukur berat pakan di piring) |
-| **Aktuator** | Servo Motor SG90 (untuk membuka/menutup katup keluar pakan) |
-| **Power Supply** | Rekomendasi **5V eksternal** untuk Servo SG90 (untuk mencegah *brownout* pada ESP8266) |
+| **Sensor Jarak** | HC-SR04 Ultrasonic — mengukur sisa pakan di tabung |
+| **Sensor Berat** | Load Cell + Modul HX711 — mengukur berat pakan di piring |
+| **Aktuator** | Servo SG90 — membuka/menutup katup pakan |
+| **Power Supply** | 5V eksternal untuk Servo SG90 (mencegah *brownout* ESP8266) |
 
-## Pemetaan Pin (Wiring)
+---
 
-| Komponen | Pin Modul | Pin NodeMCU (ESP8266) | Keterangan |
-| --- | --- | --- | --- |
-| **HC-SR04** | TRIG | `D7` (GPIO 13) | Trigger |
-| **HC-SR04** | ECHO | `D8` (GPIO 15) | Echo |
-| **HX711** | DT | `D5` (GPIO 14) | Data |
-| **HX711** | SCK | `D6` (GPIO 12) | Clock |
-| **Servo SG90** | Signal (PWM) | `D4` (GPIO 2) | Kontrol katup |
+## Wiring & Pin Mapping
 
-> **Penting:** Pastikan VCC/GND Servo terhubung ke sumber 5V eksternal dengan ground yang sama dengan NodeMCU.
+Pin dikonfigurasi di [`include/config.h`](include/config.h).
 
-## Struktur File Project
+| Komponen | Pin Modul | Pin NodeMCU | GPIO | Keterangan |
+|---|---|---|---|---|
+| **HC-SR04** | TRIG | `D7` | GPIO 13 | Trigger ultrasonik |
+| **HC-SR04** | ECHO | `D8` | GPIO 15 | Echo ultrasonik — **wajib pembagi tegangan 5V → 3.3V** |
+| **HX711** | DT | `D5` | GPIO 14 | Data load cell |
+| **HX711** | SCK | `D6` | GPIO 12 | Clock load cell |
+| **Servo SG90** | Signal | `D4` | GPIO 2 | PWM kontrol katup |
+
+> **Penting:** Hubungkan VCC/GND Servo ke sumber 5V eksternal dengan *common ground* ke NodeMCU. Jangan mengandalkan pin 5V dari USB NodeMCU.
+
+---
+
+## Struktur Direktori
 
 ```text
 smart_pet_feeder/
-├── smart_pet_feeder.ino   # Sketsa utama (logika mode, Blynk, timer, EEPROM, servo)
-├── config.h               # Konfigurasi pin, threshold, timing, kalibrasi & parameter sistem
-├── secrets.h              # Kredensial WiFi & Blynk Auth Token
-├── README.md              # Dokumentasi project
-├── test_load_cell/        # Helper untuk mendapatkan nilai raw HX711 saat kalibrasi
-└── reset_EEPROM/          # Utility untuk menghapus seluruh isi EEPROM
+├── include/
+│   ├── config.h          # Pin, konstanta fisik, threshold, timing sistem
+│   └── secrets.h         # Kredensial Wi-Fi & Blynk (tidak masuk Git)
+├── src/
+│   ├── main.cpp          # Firmware utama: mode, Blynk, timer, EEPROM, servo
+│   ├── reset_eeprom/
+│   │   └── reset_eeprom.cpp   # Utilitas: hapus seluruh EEPROM
+│   └── test_load_cell/
+│       └── test_load_cell.cpp # Utilitas: baca nilai raw HX711 untuk kalibrasi
+├── platformio.ini        # Konfigurasi multi-environment PlatformIO
+└── README.md             # Dokumentasi proyek
 ```
 
-## Library yang Dibutuhkan
+---
 
-Install melalui **Arduino IDE > Sketch > Include Library > Manage Libraries**:
+## Persiapan Environment PlatformIO
 
-| Library | Author | Kegunaan |
-| --- | --- | --- |
-| [`Blynk`](https://docs.blynk.io/) | Volodymyr Shymanskyy | Koneksi & komunikasi dengan aplikasi Blynk IoT |
-| [`HX711 Arduino Library`](https://github.com/bogde/HX711) | Bogdan Necula | Pembacaan nilai dari modul HX711 |
-| [`Servo`](https://www.arduino.cc/reference/en/libraries/servo/) | Arduino | Pengendalian sudut Servo SG90 |
+### Prasyarat
 
-> `ESP8266WiFi`, `EEPROM`, `time.h` sudah tersedia secara bawaan saat menggunakan **ESP8266 Arduino Core**.
+1. Install [Visual Studio Code](https://code.visualstudio.com/).
+2. Install ekstensi **PlatformIO IDE** dari marketplace VS Code.
+3. Atau install PlatformIO Core (CLI) secara langsung:
 
-## Instalasi & Konfigurasi
-
-### 1. Persiapan Environment
-
-1. Instal [Arduino IDE](https://www.arduino.cc/en/software).
-2. Tambahkan **ESP8266 Board Package** melalui `File > Preferences > Additional Boards Manager URLs` dengan: 
-
-   ```text
-   https://arduino.esp8266.com/stable/package_esp8266com_index.json
+   ```bash
+   pip install platformio
    ```
-3. Install `esp8266` core melalui `Tools > Board > Boards Manager`.
-4. Pilih board: `Tools > Board > ESP8266 Boards > NodeMCU 1.0 (ESP-12E Module)`.
-5. Install library yang dibutuhkan seperti pada tabel di atas.
 
-### 2. Konfigurasi Kredensial
+4. Buka folder proyek di VS Code atau navigasi ke direktori proyek via terminal.
 
-Buka file `secrets.h` dan sesuaikan dengan milik kamu:
+### Environment yang Tersedia
+
+Proyek ini memiliki tiga environment terpisah di `platformio.ini`:
+
+| Environment | Kegunaan | Kapan Digunakan |
+|---|---|---|
+| `nodemcu` *(default)* | Firmware utama Smart Pet Feeder | Upload ke perangkat untuk operasional |
+| `test_load_cell` | Kalibrasi HX711 | Sebelum/saat kalibrasi hardware |
+| `reset_eeprom` | Hapus konfigurasi EEPROM | Saat reset konfigurasi atau pergantian hardware |
+
+---
+
+## Instalasi Dependensi
+
+PlatformIO mengunduh dependensi secara otomatis saat build pertama kali. Dependensi per environment:
+
+| Environment | Library | Versi |
+|---|---|---|
+| `nodemcu` | `bogde/HX711` | `^0.7.5` |
+| `nodemcu` | `blynkkk/Blynk` | `^1.3.2` |
+| `test_load_cell` | `bogde/HX711` | `^0.7.5` |
+| `reset_eeprom` | *(built-in EEPROM)* | — |
+
+Library bawaan ESP8266 yang sudah tersedia: `ESP8266WiFi`, `EEPROM`, `Servo`, `time.h`.
+
+Untuk mengunduh dependensi secara manual tanpa build:
+
+```bash
+pio pkg install -e nodemcu
+pio pkg install -e test_load_cell
+```
+
+---
+
+## Konfigurasi Wi-Fi & Blynk
+
+Buat file `include/secrets.h` dengan isi berikut (file ini **tidak masuk Git**):
 
 ```cpp
-#define SECRET_BLYNK_TOKEN "YOUR_BLYNK_AUTH_TOKEN"
-#define SECRET_WIFI_SSID   "YOUR_WIFI_SSID"
-#define SECRET_WIFI_PASS   "YOUR_WIFI_PASSWORD"
+#pragma once
+
+#define SECRET_BLYNK_TOKEN  "YOUR_BLYNK_AUTH_TOKEN"
+#define SECRET_WIFI_SSID    "YOUR_WIFI_SSID"
+#define SECRET_WIFI_PASS    "YOUR_WIFI_PASSWORD"
 ```
 
-Pada `smart_pet_feeder.ino`, nilai Blynk diambil dari `secrets.h`:
+Kemudian di `src/main.cpp`, konfigurasikan Template ID dan Template Name sesuai proyek Blynk Anda:
 
 ```cpp
 #define BLYNK_TEMPLATE_ID   "YOUR_TEMPLATE_ID"
-#define BLYNK_TEMPLATE_NAME "smart pet feeder"
-#define BLYNK_AUTH_TOKEN    SECRET_BLYNK_TOKEN
+#define BLYNK_TEMPLATE_NAME "YOUR_TEMPLATE_NAME"
 ```
 
-> **Catatan:** File `secrets.h` saat ini berisi nilai contoh. Sangat disarankan untuk **tidak mempublikasikan file ini** jika repo di-fork ke repository publik.
+> **Catatan:** Jangan pernah menyimpan nilai token, SSID, atau password secara langsung di file yang masuk Git.
 
-### 3. Upload Firmware
+---
 
-1. Buka `smart_pet_feeder.ino` di Arduino IDE.
-2. Pastikan port COM/Serial sudah terpilih sesuai NodeMCU kamu.
-3. Klik `Upload`.
-4. Buka Serial Monitor (`115200 baud`) untuk melihat log inisialisasi sistem.
+## Build & Upload Firmware
+
+### Firmware Utama (env: nodemcu)
+
+```bash
+# Build
+pio run -e nodemcu
+
+# Build & Upload ke perangkat
+pio run -e nodemcu --target upload
+
+# Upload & buka Serial Monitor (115200 baud)
+pio run -e nodemcu --target upload && pio device monitor
+```
+
+### Serial Monitor Saja
+
+```bash
+pio device monitor -e nodemcu
+```
+
+---
 
 ## Kalibrasi Load Cell
 
-Agar pembacaan berat akurat, lakukan kalibrasi berikut:
+Kalibrasi dilakukan satu kali saat pertama kali merakit hardware, atau saat mengganti Load Cell.
 
-### Langkah 1: Dapatkan nilai raw
+### Langkah 1 — Upload program kalibrasi
 
-1. Buka sketch `test_load_cell/test_load_cell.ino`
-2. Upload ke NodeMCU
-3. Buka Serial Monitor dengan baudrate `115200`
-4. Letakkan **Load Cell tanpa beban apapun**. Amati nilai rata-rata yang muncul
-5. Catat nilai tersebut
+```bash
+pio run -e test_load_cell --target upload
+```
 
-### Langkah 2: Atur faktor kalibrasi
+### Langkah 2 — Baca nilai raw HX711
 
-1. Buka `config.h`
-2. Ubah nilai `DEFAULT_CALIBRATION` sesuai hasil kalibrasi alat kamu:
+```bash
+pio device monitor -e test_load_cell
+```
 
-   ```cpp
-   const float DEFAULT_CALIBRATION = 392.0; // Sesuaikan dengan hasil kalibrasi hardware
-   ```
-3. Upload kembali `smart_pet_feeder.ino`
+- Letakkan Load Cell **tanpa beban apapun**.
+- Amati nilai rata-rata yang tercetak di Serial Monitor tiap 1 detik.
+- Catat nilai tersebut.
 
-### Langkah 3: Tare (Zeroing)
+### Langkah 3 — Atur faktor kalibrasi
 
-1. Pastikan piring dalam keadaan **benar-benar kosong**.
-2. Tekan tombol **Tare (V7)** pada aplikasi Blynk.
-3. Nilai *offset* akan otomatis tersimpan ke EEPROM pada alamat `EEPROM_ADDR_OFFSET`.
-4. Setelah itu, pembacaan berat akan dimulai dari `0 gram`.
+Buka [`include/config.h`](include/config.h) dan sesuaikan:
+
+```cpp
+const float DEFAULT_CALIBRATION = 392.0;  // Ganti dengan nilai dari langkah 2
+```
+
+### Langkah 4 — Upload firmware utama kembali
+
+```bash
+pio run -e nodemcu --target upload
+```
+
+### Langkah 5 — Tare (Zeroing)
+
+1. Pastikan piring dalam keadaan **kosong**.
+2. Tekan tombol **Tare (V7)** di aplikasi Blynk.
+3. Nilai offset akan tersimpan otomatis ke EEPROM.
+4. Pembacaan berat dimulai dari `0 gram`.
+
+---
+
+## Reset EEPROM
+
+Gunakan saat konfigurasi korup, setelah mengubah struktur `Konfig`, atau untuk reset penuh ke kondisi awal.
+
+### Upload program reset
+
+```bash
+pio run -e reset_eeprom --target upload
+```
+
+### Verifikasi
+
+```bash
+pio device monitor -e reset_eeprom
+```
+
+Tunggu hingga Serial Monitor menampilkan:
+```
+EEPROM berhasil dibersihkan!
+```
+
+### Upload firmware utama kembali
+
+```bash
+pio run -e nodemcu --target upload
+```
+
+> **Perhatian:** Reset EEPROM menghapus offset kalibrasi Load Cell, jadwal, mode, dan semua konfigurasi tersimpan. Lakukan tare ulang setelah reset.
+
+---
 
 ## Konfigurasi Blynk IoT
 
-Buat **Template** dan **Datastream** pada [Blynk Web Console](https://blynk.cloud/) sesuai tabel berikut:
+Buat **Template** dan **Datastream** di [Blynk Web Console](https://blynk.cloud/) sesuai tabel berikut:
 
-| Virtual Pin | Nama Datastream | Tipe | Keterangan |
-| --- | --- | --- | --- |
-| **V0** | Sisa Pakan (Tabung) | Integer/Double | Persentase sisa pakan di dalam tabung berdasarkan pembacaan HC-SR04 |
-| **V1** | Berat Pakan (Piring) | Integer/Double | Berat aktual pakan yang ada di piring (gram) |
-| **V2** | Status Sistem | String | Menampilkan status seperti `Mode Manual`, `Mengisi Pakan...`, `Selesai Mengisi (+X g)`, `Tabung Habis!`, `Piring Penuh`, dll. |
-| **V3** | Tombol Manual Feed | Integer (Push) | Tombol untuk memberi pakan secara manual (hanya aktif di Mode Manual) |
-| **V4** | Input Jadwal | String | Input jadwal dengan format `HH:MM, HH:MM, ...` (maks. 5 jadwal) |
-| **V5** | Zona Waktu (Jam) | Double | Atur offset waktu dalam jam (contoh: `7` untuk WIB, `5.5` untuk IST). Bisa bernilai pecahan. |
-| **V6** | Pemilihan Mode | Integer (Select/Dropdown) | Pilih mode: `1` = Manual, `2` = Smart, `3` = Schedule |
-| **V7** | Tare / Kalibrasi Nol | Integer (Push) | Tekan saat piring kosong untuk menyimpan titik nol ke EEPROM |
-| **V9** | Kekuatan Sinyal WiFi | Integer (Gauge) | Menampilkan nilai RSSI dalam dBm (`-100` s/d `0`) |
+| Virtual Pin | Nama | Tipe Data | Keterangan |
+|---|---|---|---|
+| **V0** | Sisa Pakan (Tabung) | Integer | Persentase sisa pakan dari pembacaan HC-SR04 (0–100%) |
+| **V1** | Berat Pakan (Piring) | Double | Berat aktual pakan di piring (gram) |
+| **V2** | Status Sistem | String | Status: `Mode Manual`, `Mengisi Pakan...`, `Selesai Mengisi (+X g)`, `Tabung Habis!`, `Piring Penuh`, dll. |
+| **V3** | Tombol Manual Feed | Integer (Push) | Tombol beri pakan manual (aktif hanya di Mode Manual) |
+| **V4** | Input Jadwal | String | Format `HH:MM, HH:MM, ...` — maks. 5 jadwal |
+| **V5** | Zona Waktu (Jam) | Double | Offset waktu dalam jam (contoh: `7` untuk WIB, `5.5` untuk IST) |
+| **V6** | Pilihan Mode | Integer | `1` = Manual, `2` = Smart, `3` = Schedule |
+| **V7** | Tare / Kalibrasi Nol | Integer (Push) | Tekan saat piring kosong — simpan titik nol ke EEPROM |
+| **V8** | Alert Sensor | String | Peringatan error sensor (ultrasonik/load cell/Wi-Fi lemah) |
+| **V9** | Kekuatan Sinyal Wi-Fi | Integer (Gauge) | RSSI dalam dBm (`-100` s/d `0`) |
+
+---
 
 ## Cara Penggunaan
 
 ### Mode Manual
-1. Set `V6` ke mode **Manual (1)**.
-2. Tekan tombol **Manual Feed (V3)** untuk mengeluarkan pakan.
-3. Terdapat jeda **10 detik** antar penekanan untuk mencegah *spamming* tombol.
+
+1. Set **V6** ke `1` (Manual).
+2. Tekan tombol **Manual Feed (V3)** untuk memberi pakan.
+3. Terdapat jeda **10 detik** antar penekanan untuk mencegah spam.
 
 ### Mode Smart
-1. Set `V6` ke mode **Smart (2)**.
-2. Sistem akan memantau berat piring tiap 4 detik.
-3. Jika berat piring < `20 gram`, tabung tidak kosong, dan syarat lain terpenuhi, katup akan terbuka secara otomatis.
-4. Sistem menerapkan *cooldown* **30 menit**, maksimal **6 kali** pemberian per hari, serta menunggu sinkronisasi NTP saat baru dinyalakan.
+
+1. Set **V6** ke `2` (Smart).
+2. Sistem memantau berat piring setiap 4 detik.
+3. Jika berat < `20 gram`, tabung tidak kosong, dan syarat terpenuhi, katup terbuka otomatis.
+4. Constraints: *cooldown* **30 menit**, maksimal **6 kali/hari**, menunggu sinkron NTP saat baru dinyalakan.
 
 ### Mode Schedule
-1. Set `V6` ke mode **Schedule (3)**.
-2. Masukkan jadwal pada `V4` dengan format `HH:MM` dipisahkan koma. Contoh: `07:00, 13:00, 19:00`
-3. Sistem akan mengeksekusi pemberian pakan **hanya sekali** per jadwal di hari yang sama.
-4. Jika saat jadwal tiba kondisi tidak memungkinkan (sedang memberi, tabung habis, atau piring penuh), sistem akan **mencoba kembali** pada pengecekan berikutnya tanpa menghabiskan kuota jadwal hari itu.
 
-## File Pendukung
+1. Set **V6** ke `3` (Schedule).
+2. Masukkan jadwal di **V4**: format `HH:MM` dipisah koma. Contoh: `07:00, 13:00, 19:00`.
+3. Sistem mengeksekusi pemberian pakan **satu kali** per jadwal per hari.
+4. Jika saat jadwal kondisi tidak memungkinkan (katup sibuk/tabung habis/piring penuh), sistem **mencoba lagi** pada pengecekan berikutnya tanpa menghabiskan kuota.
 
-| File/Folder | Fungsi |
-| --- | --- |
-| `test_load_cell/test_load_cell.ino` | Membaca nilai mentah dari HX711 untuk membantu menentukan `DEFAULT_CALIBRATION` di `config.h`. |
-| `reset_EEPROM/reset_eeprom/reset_eeprom.ino` | Menghapus seluruh isi EEPROM (menulis `0xFF` ke 512 byte). Berguna saat ingin mereset konfigurasi mode, jadwal, offset, atau struktur EEPROM yang bermasalah. |
+### Pengaturan Zona Waktu
 
-> Untuk mereset EEPROM, upload sketch `reset_eeprom.ino` terpisah, tunggu pesan `"EEPROM berhasil dibersihkan!"` di Serial Monitor, lalu upload kembali `smart_pet_feeder.ino`.
+Atur offset waktu melalui **V5** (contoh: `7.0` untuk WIB, `7.5` untuk WITA, `8.0` untuk WIT).
+
+---
 
 ## Troubleshooting
 
 | Masalah | Kemungkinan Penyebab | Solusi |
-| --- | --- | --- |
-| **HX711 tidak merespons / berat `NaN`** | Kabel longgar, wiring salah, atau beban tidak stabil | Periksa koneksi DT/SCK, pastikan kabel tidak putus, dan jalankan `test_load_cell.ino` untuk verifikasi. |
-| **Servo bergetar / ESP8266 restart saat buka katup** | Tegangan drop saat servo bergerak | **Wajib** gunakan sumber 5V eksternal untuk servo dengan *common ground* ke NodeMCU. |
-| **Jadwal tidak berjalan** | Belum tersinkron NTP / WiFi terputus | Pastikan koneksi internet stabil. Tunggu beberapa saat hingga waktu tersinkron (cek log Serial). Hindari WiFi dengan *captive portal*. |
-| **Smart Mode tidak memberi pakan** | Berat piring >= 20g, tabung habis, jeda 30 menit, atau sudah 6x/hari | Periksa berat di V1, persentase tabung di V0, serta status di V2. Hitungan harian akan reset otomatis saat berganti hari. |
-| **Blynk sering putus** | Sinyal WiFi lemah (`RSSI` mendekati -90 dBm) | Dekatkan alat ke router, gunakan repeater, atau pindah ke jaringan 2.4GHz yang lebih stabil. |
-| **"Pakan Macet?" muncul setelah mengisi** | Aliran pakan tersumbat atau keluar terlalu sedikit | Bersihkan saluran katup/wadah keluar pakan. Pastikan tidak ada pakan yang menggumpal di sekitar mekanisme servo. |
-| **Setelah flash/reset konfigurasi aneh** | Struktur config berubah / EEPROM lama tidak cocok | Gunakan `reset_EEPROM/reset_eeprom/reset_eeprom.ino` untuk menghapus EEPROM, lalu upload `smart_pet_feeder.ino` kembali. |
+|---|---|---|
+| **HX711 tidak merespons / berat `NaN`** | Kabel longgar atau wiring salah | Periksa koneksi DT/SCK, jalankan `test_load_cell` untuk verifikasi |
+| **Servo bergetar / ESP8266 restart saat buka katup** | Tegangan drop saat servo aktif | Gunakan sumber 5V eksternal untuk servo dengan *common ground* ke NodeMCU |
+| **Jadwal tidak berjalan** | NTP belum sinkron / Wi-Fi terputus | Pastikan koneksi internet stabil, tunggu beberapa detik, hindari jaringan *captive portal* |
+| **Smart Mode tidak memberi pakan** | Berat ≥ 20 g, tabung habis, jeda 30 menit, atau sudah 6×/hari | Periksa V0 (tabung), V1 (berat), V2 (status) |
+| **Blynk sering putus** | Sinyal Wi-Fi lemah (RSSI mendekati -90 dBm) | Dekatkan perangkat ke router atau gunakan repeater Wi-Fi |
+| **"Pakan Macet?" setelah mengisi** | Aliran pakan tersumbat | Bersihkan saluran katup/wadah, pastikan pakan tidak menggumpal |
+| **Konfigurasi aneh setelah flash** | Struktur EEPROM tidak cocok | Jalankan `reset_eeprom`, lalu upload `nodemcu` kembali |
+| **Alert sensor di V8** | Ultrasonik / HX711 tidak merespons | Periksa wiring, pastikan tidak ada komponen longgar |
+
+---
 
 ## Catatan Penting
 
-- **Kabel Power:** Gunakan kabel USB yang cukup kuat, atau lebih disarankan adaptor 5V terpisah untuk beban servo. Hindari power murni dari USB PC jika servo kaku saat beroperasi.
-- **Jaringan WiFi:** **Hindari** WiFi publik seperti kampus, hotel, atau kafe yang menggunakan *captive portal* (halaman login web). Gunakan WiFi rumah/hotspot pribadi.
-- **Ukuran Tabung:** Sesuaikan nilai `TINGGI_WADAH_CM` di `config.h` dengan jarak aktual antara sensor HC-SR04 dan dasar tabung saat kondisi **kosong**. Kesalahan nilai ini akan membuat persentase sisa pakan di V0 kurang akurat.
-- **Keamanan Kredensial:** Jangan upload `secrets.h` dengan token asli ke repository publik. Pertimbangkan untuk menambahkan `secrets.h` ke `.gitignore` jika kamu berencana mem-push project ini ke GitHub.
-- **EEPROM:** Layout EEPROM bersifat tetap (`magic = 0xFEED0A03`). Jika struktur `struct Konfig` diubah, sistem akan otomatis melakukan *reset* konfigurasi untuk menghindari pembacaan data yang tidak valid.
-- **Zona Waktu:** `configTime` diset ke UTC, sehingga offset wajib diatur melalui `V5` agar jadwal berjalan sesuai waktu yang diinginkan.
+- **Power Servo:** Gunakan adaptor 5V eksternal, bukan pin 5V dari USB NodeMCU. Servo yang mengambil daya dari NodeMCU dapat menyebabkan *brownout* dan restart tiba-tiba.
+- **Jaringan Wi-Fi:** Hindari Wi-Fi publik (*captive portal* seperti hotspot kampus/kafe). Gunakan Wi-Fi rumah atau hotspot pribadi.
+- **Ukuran Tabung:** Sesuaikan `TINGGI_WADAH_CM` di `include/config.h` dengan jarak aktual antara sensor HC-SR04 dan dasar tabung saat **kosong**. Nilai yang salah mengakibatkan persentase sisa pakan tidak akurat.
+- **EEPROM Layout:** Layout EEPROM bersifat tetap (`magic = 0xFEED0A03`). Perubahan pada `struct Konfig` di `main.cpp` akan menyebabkan sistem reset otomatis ke konfigurasi default.
+- **Zona Waktu:** `configTime` diset ke UTC. Offset zona waktu wajib diatur melalui **V5** agar jadwal berjalan sesuai waktu lokal.
+- **Keamanan Kredensial:** File `include/secrets.h` sudah dikecualikan dari Git. Jangan pernah menuliskan token atau password langsung di file source code yang masuk ke repository.
