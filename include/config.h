@@ -19,7 +19,7 @@
 // 2. DIMENSI FISIK & SERVO
 // ------------------------------------------------------------
 const float TINGGI_WADAH_CM          = 20.0;  // Jarak sensor ultrasonik ke dasar tabung kosong (cm)
-const float JARAK_MINIMAL_TABUNG_CM  = 4.0;   // Blind spot sensor ultrasonik (jarak <= 4 cm dianggap 100% penuh)
+const float JARAK_MINIMAL_TABUNG_CM  = 3.0;   // Blind spot sensor ultrasonik (jarak <= 3 cm dianggap 100% penuh)
 const int   SERVO_TUTUP              = 0;     // Sudut servo saat katup tertutup
 const int   SERVO_BUKA               = 90;    // Sudut servo saat katup terbuka
 const unsigned long JEDA_GERAK_SERVO = 500UL; // Waktu tunggu servo berputar (ms)

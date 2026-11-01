@@ -105,9 +105,10 @@ void muatKonfigurasi() {
   }
 }
 
-String jadwalSebagaiTeks() {   // contoh: "07:00, 13:30"
+// Format teks jadwal untuk sinkronisasi tampilan Blynk (mis. "07:00, 13:30")
+String jadwalSebagaiTeks() {
   String hasil;
-  char buf[8];
+  char buf[16];
   for (int i = 0; i < cfg.jumlah; i++) {
     snprintf(buf, sizeof(buf), "%02d:%02d", cfg.jadwal[i] / 60, cfg.jadwal[i] % 60);
     if (i) hasil += ", ";
@@ -134,7 +135,9 @@ int cariJadwal(const int16_t* daftar, int n, int menit) {
 // ------------------------------------------------------------
 // SENSOR
 // ------------------------------------------------------------
-// Jarak (cm), atau -1 jika sensor tidak merespons
+// Membaca jarak ultrasonik (cm). Menggunakan median filter 3 sampel
+// dan jeda 40ms antar-ping untuk meredam gema pantulan di dalam wadah silinder.
+// Mengembalikan -1.0 jika sensor tidak merespons (timeout).
 float bacaJarakUltrasonik() {
   float bacaan[3];
   int count = 0;
@@ -146,20 +149,21 @@ float bacaJarakUltrasonik() {
     delayMicroseconds(10);
     digitalWrite(PIN_TRIG, LOW);
 
-    // Timeout 25000 us (~4.2 meter, tabung 20 cm)
+    // Timeout 25000 us (~4.2 meter)
     long durasi = pulseIn(PIN_ECHO, HIGH, 25000);
     if (durasi > 0) {
       float d = durasi * 0.0343f / 2.0f;
-      if (d > 0.5f) {
+      // Filter jarak fisik valid (jarak <= batas minimal di-clamp 100% oleh hitungPersen)
+      if (d > 0.5f) { 
         bacaan[count++] = d;
       }
     }
-    if (i < 2) delay(15);
+    if (i < 2) delay(40); // Jeda redaman gema pantulan tabung
   }
 
   if (count == 0) return -1.0f;
 
-  // Sorting untuk mengambil nilai tengah (median filter)
+  // Sorting sampel valid
   for (int i = 0; i < count - 1; i++) {
     for (int j = i + 1; j < count; j++) {
       if (bacaan[i] > bacaan[j]) {
@@ -170,23 +174,30 @@ float bacaJarakUltrasonik() {
     }
   }
 
-  return bacaan[count / 2];
+  // Median filter untuk menolak noise/glitch
+  if (count == 3) return bacaan[1];
+  if (count == 2) return (bacaan[0] + bacaan[1]) / 2.0f;
+  return bacaan[0];
 }
 
-// Sisa pakan di tabung, 0..100 %, atau -1 jika jarak tidak valid
+// Menghitung persentase sisa pakan (0..100%). Return -1 jika pembacaan tidak valid.
 int hitungPersen(float jarak_cm) {
   if (jarak_cm < 0.0f) return -1;
-  if (jarak_cm <= JARAK_MINIMAL_TABUNG_CM) return 100; // Jarak <= batas minimal (blind spot / tabung penuh)
-  if (jarak_cm >= TINGGI_WADAH_CM) return 0;           // Jarak >= tinggi tabung (tabung kosong)
+  
+  // Tabung penuh atau masuk zona blind spot sensor (<= 4 cm)
+  if (jarak_cm <= JARAK_MINIMAL_TABUNG_CM) return 100; 
+  // Tabung kosong atau jarak melebihi tinggi dasar wadah
+  if (jarak_cm >= TINGGI_WADAH_CM) return 0;           
 
   float rentang = TINGGI_WADAH_CM - JARAK_MINIMAL_TABUNG_CM;
   if (rentang <= 0.0f) return 0;
 
+  // Pemetaan persentase linier
   int persen = lroundf((TINGGI_WADAH_CM - jarak_cm) / rentang * 100.0f);
   return constrain(persen, 0, 100);
 }
 
-// Berat piring (gram), atau NAN jika HX711 tidak merespons
+// Membaca berat wadah makan (gram). Return NAN jika modul HX711 timeout/tidak merespons.
 float bacaBeratLoadCell() {
   if (!scale.wait_ready_timeout(1000)) return NAN;
   return fmaxf(scale.get_units(5), 0.0f);
