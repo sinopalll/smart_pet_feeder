@@ -1,0 +1,16 @@
+# File sistem dan editor
+.DS_Store
+Thumbs.db
+.vscode/
+
+# PlatformIO
+.pio/
+build/
+
+# File sementara
+*.tmp
+*.bak
+
+# File rahasia dan konfigurasi agent
+include/secrets.h
+AGENTS.md
