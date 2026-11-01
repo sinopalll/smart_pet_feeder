@@ -1,8 +1,6 @@
 #include <Arduino.h>
 #include <HX711.h>
-
-#define PIN_HX711_DT  14  // D5 / GPIO14
-#define PIN_HX711_SCK 12  // D6 / GPIO12
+#include "config.h"
 
 HX711 scale;
 

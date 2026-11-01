@@ -136,16 +136,53 @@ int cariJadwal(const int16_t* daftar, int n, int menit) {
 // ------------------------------------------------------------
 // Jarak (cm), atau -1 jika sensor tidak merespons
 float bacaJarakUltrasonik() {
-  digitalWrite(PIN_TRIG, LOW);  delayMicroseconds(2);
-  digitalWrite(PIN_TRIG, HIGH); delayMicroseconds(10);
-  digitalWrite(PIN_TRIG, LOW);
-  long durasi = pulseIn(PIN_ECHO, HIGH, 30000);
-  return durasi == 0 ? -1.0f : durasi * 0.0343f / 2.0f;
+  float bacaan[3];
+  int count = 0;
+
+  for (int i = 0; i < 3; i++) {
+    digitalWrite(PIN_TRIG, LOW);
+    delayMicroseconds(2);
+    digitalWrite(PIN_TRIG, HIGH);
+    delayMicroseconds(10);
+    digitalWrite(PIN_TRIG, LOW);
+
+    // Timeout 25000 us (~4.2 meter, tabung 20 cm)
+    long durasi = pulseIn(PIN_ECHO, HIGH, 25000);
+    if (durasi > 0) {
+      float d = durasi * 0.0343f / 2.0f;
+      if (d > 0.5f) {
+        bacaan[count++] = d;
+      }
+    }
+    if (i < 2) delay(15);
+  }
+
+  if (count == 0) return -1.0f;
+
+  // Sorting untuk mengambil nilai tengah (median filter)
+  for (int i = 0; i < count - 1; i++) {
+    for (int j = i + 1; j < count; j++) {
+      if (bacaan[i] > bacaan[j]) {
+        float temp = bacaan[i];
+        bacaan[i] = bacaan[j];
+        bacaan[j] = temp;
+      }
+    }
+  }
+
+  return bacaan[count / 2];
 }
 
-// Sisa pakan di tabung, 0..100 %
+// Sisa pakan di tabung, 0..100 %, atau -1 jika jarak tidak valid
 int hitungPersen(float jarak_cm) {
-  int persen = lroundf((TINGGI_WADAH_CM - jarak_cm) / TINGGI_WADAH_CM * 100.0f);
+  if (jarak_cm < 0.0f) return -1;
+  if (jarak_cm <= JARAK_MINIMAL_TABUNG_CM) return 100; // Jarak <= batas minimal (blind spot / tabung penuh)
+  if (jarak_cm >= TINGGI_WADAH_CM) return 0;           // Jarak >= tinggi tabung (tabung kosong)
+
+  float rentang = TINGGI_WADAH_CM - JARAK_MINIMAL_TABUNG_CM;
+  if (rentang <= 0.0f) return 0;
+
+  int persen = lroundf((TINGGI_WADAH_CM - jarak_cm) / rentang * 100.0f);
   return constrain(persen, 0, 100);
 }
 
